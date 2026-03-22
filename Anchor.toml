@@ -7,7 +7,7 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-phay = "3QKf5FmT8dChueofJ21TbnNwoCPdF7vet8YPG8uXoz3j"
+phay = "9ZPxLCiFWK8ba2XN5DkM4aqUc4acYK9Z5orF5eSEa2CH"
 
 [registry]
 url = "https://api.apr.dev"

@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::system_instruction;
 
-declare_id!("3QKf5FmT8dChueofJ21TbnNwoCPdF7vet8YPG8uXoz3j"); 
+
+declare_id!("9ZPxLCiFWK8ba2XN5DkM4aqUc4acYK9Z5orF5eSEa2CH"); 
 
 #[program]
 pub mod phay {
@@ -41,17 +41,8 @@ pub mod phay {
             PhayError::InvalidProduct
         );
 
-        let ix = system_instruction::transfer(&vault.key(), &dest, amount);
-
-        anchor_lang::solana_program::program::invoke_signed(
-            &ix,
-            &[
-                ctx.accounts.vault.to_account_info(),
-                ctx.accounts.destination.to_account_info(),
-                ctx.accounts.system_program.to_account_info(),
-            ],
-            &[&[b"phay_vault", vault.owner.as_ref(), &[vault.bump]]],
-        )?;
+        **ctx.accounts.vault.to_account_info().try_borrow_mut_lamports()? -= amount;
+        **ctx.accounts.destination.try_borrow_mut_lamports()? += amount;
 
         Ok(())
     }

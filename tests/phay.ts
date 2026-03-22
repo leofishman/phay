@@ -15,6 +15,7 @@ describe("phay", () => {
   const user = anchor.web3.Keypair.generate(); // The "child" or "freelancer"
   const approvedMerchant = anchor.web3.Keypair.generate();
   const unauthorizedHacker = anchor.web3.Keypair.generate();
+  const specificMerchant = new anchor.web3.PublicKey("EtE8fCMh9YfvEpV1BSagCoLZtTpA4WFxQN62tCFz5FMW");
 
   // Deriving the PDA for the Phay Vault
   const [vaultPDA] = anchor.web3.PublicKey.findProgramAddressSync(
@@ -23,15 +24,13 @@ describe("phay", () => {
   );
 
   it("Initializes the Phay Card with a whitelist successfully!", async () => {
-    const whitelist = [approvedMerchant.publicKey];
-    const allowedProducts = [new anchor.BN(1), new anchor.BN(2)];
+    const whitelist = [approvedMerchant.publicKey, specificMerchant];
+    const allowedProducts = [new anchor.BN(1), new anchor.BN(2), new anchor.BN(3), new anchor.BN(4)];
 
     await program.methods
       .initializeVault(user.publicKey, whitelist, allowedProducts)
       .accounts({
-        vault: vaultPDA,
         owner: owner.publicKey,
-        systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
 
@@ -51,7 +50,6 @@ describe("phay", () => {
           vault: vaultPDA,
           user: user.publicKey,
           destination: approvedMerchant.publicKey,
-          systemProgram: anchor.web3.SystemProgram.programId,
         })
         .signers([user])
         .rpc();
@@ -71,7 +69,6 @@ describe("phay", () => {
           vault: vaultPDA,
           user: user.publicKey,
           destination: unauthorizedHacker.publicKey,
-          systemProgram: anchor.web3.SystemProgram.programId,
         })
         .signers([user])
         .rpc();
@@ -83,4 +80,41 @@ describe("phay", () => {
       console.log("✅ Security check passed: Unauthorized payment blocked.");
     }
   });
+
+  it("Should SUCCEED if the User pays an AUTHORIZED address for an ALLOWED product", async () => {
+    // Fund the vault PDA with some SOL so it can transfer
+    const fundTx = new anchor.web3.Transaction().add(
+      anchor.web3.SystemProgram.transfer({
+        fromPubkey: owner.publicKey,
+        toPubkey: vaultPDA,
+        lamports: 1 * anchor.web3.LAMPORTS_PER_SOL,
+      })
+    );
+    await provider.sendAndConfirm(fundTx);
+
+    const payAmount = new anchor.BN(0.1 * anchor.web3.LAMPORTS_PER_SOL);
+    const validProductId = new anchor.BN(3);
+
+    const initialMerchantBalance = await provider.connection.getBalance(specificMerchant);
+
+    await program.methods
+      .securePay(payAmount, validProductId)
+      .accounts({
+        vault: vaultPDA,
+        user: user.publicKey,
+        destination: specificMerchant,
+      })
+      .signers([user])
+      .rpc();
+
+    const finalMerchantBalance = await provider.connection.getBalance(specificMerchant);
+    expect(finalMerchantBalance - initialMerchantBalance).to.equal(payAmount.toNumber());
+    console.log("✅ Phay successfully executed an authorized payment!");
+    console.log("Merchant balance: ", finalMerchantBalance);
+    console.log("Initial merchant balance: ", initialMerchantBalance);
+    console.log("Pay amount: ", payAmount.toNumber());
+    console.log("Final merchant balance - Initial merchant balance: ", finalMerchantBalance - initialMerchantBalance);
+    console.log("Pay amount: ", payAmount.toNumber());
+  })
 });
+
