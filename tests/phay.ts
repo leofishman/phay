@@ -4,24 +4,25 @@ import { Phay } from "../target/types/phay";
 import { expect } from "chai";
 
 describe("phay", () => {
+  // Configure the client to use the local cluster provider
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
   const program = anchor.workspace.Phay as Program<Phay>;
 
-  // Generamos cuentas de prueba
-  const owner = provider.wallet;
-  const user = anchor.web3.Keypair.generate();
+  // Test accounts
+  const owner = provider.wallet; // The one who creates and funds the vault
+  const user = anchor.web3.Keypair.generate(); // The "child" or "freelancer"
   const approvedMerchant = anchor.web3.Keypair.generate();
-  const hackerAddress = anchor.web3.Keypair.generate();
+  const unauthorizedHacker = anchor.web3.Keypair.generate();
 
-  // Encontrar el PDA
+  // Deriving the PDA for the Phay Vault
   const [vaultPDA] = anchor.web3.PublicKey.findProgramAddressSync(
     [Buffer.from("phay_vault"), owner.publicKey.toBuffer()],
     program.programId
   );
 
-  it("Inicializa la Phay Card con éxito!", async () => {
+  it("Initializes the Phay Card with a whitelist successfully!", async () => {
     const whitelist = [approvedMerchant.publicKey];
 
     await program.methods
@@ -33,37 +34,60 @@ describe("phay", () => {
       })
       .rpc();
 
-    const vaultAccount = await program.account.vexlyVault.fetch(vaultPDA);
+    // Fetch account data to verify state
+    const vaultAccount = await program.account.phayVault.fetch(vaultPDA);
     expect(vaultAccount.user.toBase58()).to.equal(user.publicKey.toBase58());
+    expect(vaultAccount.whitelist[0].toBase58()).to.equal(approvedMerchant.publicKey.toBase58());
   });
 
-  it("Debería FALLAR si el usuario intenta pagar a una dirección NO autorizada", async () => {
-    // Primero fondeamos el PDA (necesita SOL para transferir)
-    const tx = new anchor.web3.Transaction().add(
+  it("Should allow the User to pay an APPROVED merchant", async () => {
+    // Top up the Vault PDA with 1 SOL so it has funds to spend
+    const topUpTx = new anchor.web3.Transaction().add(
       anchor.web3.SystemProgram.transfer({
         fromPubkey: owner.publicKey,
         toPubkey: vaultPDA,
         lamports: 1 * anchor.web3.LAMPORTS_PER_SOL,
       })
     );
-    await provider.sendAndConfirm(tx);
+    await provider.sendAndConfirm(topUpTx);
 
+    const paymentAmount = new anchor.BN(0.1 * anchor.web3.LAMPORTS_PER_SOL);
+
+    // Execute the secure payment
+    await program.methods
+      .securePay(paymentAmount)
+      .accounts({
+        vault: vaultPDA,
+        user: user.publicKey,
+        destination: approvedMerchant.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([user]) // The user authorizes the spend
+      .rpc();
+
+    // Check if merchant received the funds
+    const merchantBalance = await provider.connection.getBalance(approvedMerchant.publicKey);
+    expect(merchantBalance).to.be.at.least(0.1 * anchor.web3.LAMPORTS_PER_SOL);
+  });
+
+  it("Should FAIL if the User tries to pay an UNAUTHORIZED address", async () => {
     try {
       await program.methods
-        .securePay(new anchor.BN(0.1 * anchor.web3.LAMPORTS_PER_SOL))
+        .securePay(new anchor.BN(0.05 * anchor.web3.LAMPORTS_PER_SOL))
         .accounts({
           vault: vaultPDA,
           user: user.publicKey,
-          destination: hackerAddress.publicKey,
+          destination: unauthorizedHacker.publicKey,
           systemProgram: anchor.web3.SystemProgram.programId,
         })
-        .signers([user]) // El usuario firma la transacción
+        .signers([user])
         .rpc();
 
-      expect.fail("El programa debería haber lanzado un error");
+      expect.fail("The transaction should have been blocked by the whitelist");
     } catch (err: any) {
+      // Check that the error returned is our custom PhayError
       expect(err.error.errorCode.code).to.equal("AddressNotWhitelisted");
-      console.log("✅ Bloqueo exitoso: El 'hacker' no recibió fondos.");
+      console.log("✅ Security check passed: Unauthorized payment blocked.");
     }
   });
 });
