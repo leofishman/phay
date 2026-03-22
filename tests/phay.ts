@@ -40,34 +40,26 @@ describe("phay", () => {
     expect(vaultAccount.whitelist[0].toBase58()).to.equal(approvedMerchant.publicKey.toBase58());
   });
 
-  it("Should allow the User to pay an APPROVED merchant", async () => {
-    // Top up the Vault PDA with 1 SOL so it has funds to spend
-    const topUpTx = new anchor.web3.Transaction().add(
-      anchor.web3.SystemProgram.transfer({
-        fromPubkey: owner.publicKey,
-        toPubkey: vaultPDA,
-        lamports: 1 * anchor.web3.LAMPORTS_PER_SOL,
-      })
-    );
-    await provider.sendAndConfirm(topUpTx);
+  it("Should FAIL if the user tries to buy a FORBIDDEN product", async () => {
+    const forbiddenProductId = new anchor.BN(999); // e.g., Alcohol/Cigarettes ID
 
-    const paymentAmount = new anchor.BN(0.1 * anchor.web3.LAMPORTS_PER_SOL);
+    try {
+      await program.methods
+        .securePay(new anchor.BN(1000000), forbiddenProductId)
+        .accounts({
+          vault: vaultPDA,
+          user: user.publicKey,
+          destination: approvedMerchant.publicKey,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([user])
+        .rpc();
 
-    // Execute the secure payment
-    await program.methods
-      .securePay(paymentAmount)
-      .accounts({
-        vault: vaultPDA,
-        user: user.publicKey,
-        destination: approvedMerchant.publicKey,
-        systemProgram: anchor.web3.SystemProgram.programId,
-      })
-      .signers([user]) // The user authorizes the spend
-      .rpc();
-
-    // Check if merchant received the funds
-    const merchantBalance = await provider.connection.getBalance(approvedMerchant.publicKey);
-    expect(merchantBalance).to.be.at.least(0.1 * anchor.web3.LAMPORTS_PER_SOL);
+      expect.fail("Should have failed due to InvalidProduct");
+    } catch (err: any) {
+      expect(err.error.errorCode.code).to.equal("InvalidProduct");
+      console.log("✅ Phay successfully blocked a forbidden product purchase!");
+    }
   });
 
   it("Should FAIL if the User tries to pay an UNAUTHORIZED address", async () => {

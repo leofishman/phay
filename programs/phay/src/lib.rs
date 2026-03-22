@@ -1,4 +1,3 @@
-
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::system_instruction;
 
@@ -8,37 +7,41 @@ declare_id!("3QKf5FmT8dChueofJ21TbnNwoCPdF7vet8YPG8uXoz3j");
 pub mod phay {
     use super::*;
 
-    // Initialize the Phay Card (The PDA)
     pub fn initialize_vault(
         ctx: Context<InitializeVault>, 
         user: Pubkey, 
-        whitelist: Vec<Pubkey>
+        whitelist: Vec<Pubkey>,
+        allowed_products: Vec<u64> // Added this parameter
     ) -> Result<()> {
         let vault = &mut ctx.accounts.vault;
         vault.owner = ctx.accounts.owner.key();
         vault.user = user;
         vault.whitelist = whitelist;
+        vault.allowed_products = allowed_products; // Now it's initialized
         vault.bump = ctx.bumps.vault;
         Ok(())
     }
 
-    // Only approve payments to secure addresses and products
-    pub fn secure_pay(ctx: Context<SecurePay>, amount: u64) -> Result<()> {
+    pub fn secure_pay(
+        ctx: Context<SecurePay>, 
+        amount: u64, 
+        product_id: u64 
+    ) -> Result<()> {
         let vault = &ctx.accounts.vault;
         let dest = ctx.accounts.destination.key();
 
-        // TODO: Add product validation in case the destination is a product
         require!(
             vault.whitelist.contains(&dest),
             PhayError::AddressNotWhitelisted
         );
 
-        // Transfer SOL from PDA to destination
-        let ix = system_instruction::transfer(
-            &vault.key(),
-            &dest,
-            amount,
+        // PRODUCT VALIDATION: Check if the product_id is allowed
+        require!(
+            vault.allowed_products.contains(&product_id),
+            PhayError::InvalidProduct
         );
+
+        let ix = system_instruction::transfer(&vault.key(), &dest, amount);
 
         anchor_lang::solana_program::program::invoke_signed(
             &ix,
@@ -47,11 +50,7 @@ pub mod phay {
                 ctx.accounts.destination.to_account_info(),
                 ctx.accounts.system_program.to_account_info(),
             ],
-            &[&[
-                b"phay_vault",
-                vault.owner.as_ref(),
-                &[vault.bump],
-            ]],
+            &[&[b"phay_vault", vault.owner.as_ref(), &[vault.bump]]],
         )?;
 
         Ok(())
@@ -63,11 +62,13 @@ pub struct InitializeVault<'info> {
     #[account(
         init,
         payer = owner,
-        space = 8 + 32 + 32 + (4 + (32 * 5)) + 1, // 5 addresses?
+        // Adjusted space: 8 + 32 + 32 + (4 + 32*5) + (4 + 8*10) + 1
+        // (Discriminator + Owner + User + WhitelistVec + ProductsVec + Bump)
+        space = 8 + 32 + 32 + 164 + 84 + 1, 
         seeds = [b"phay_vault", owner.key().as_ref()],
         bump
     )]
-    pub vault: Account<'info, VexlyVault>,
+    pub vault: Account<'info, PhayVault>, // Fixed name
     #[account(mut)]
     pub owner: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -79,21 +80,21 @@ pub struct SecurePay<'info> {
         mut,
         seeds = [b"phay_vault", vault.owner.as_ref()],
         bump = vault.bump,
-        has_one = user, // Only user with role 'Executer' can do payments
+        has_one = user, 
     )]
-    pub vault: Account<'info, VexlyVault>,
+    pub vault: Account<'info, PhayVault>, // Fixed name
     pub user: Signer<'info>,
-    /// CHECK: We validate the destination against the whitelist in the program logic
     #[account(mut)]
     pub destination: AccountInfo<'info>,
     pub system_program: Program<'info, System>,
 }
 
 #[account]
-pub struct VexlyVault {
+pub struct PhayVault {
     pub owner: Pubkey,
     pub user: Pubkey,
     pub whitelist: Vec<Pubkey>,
+    pub allowed_products: Vec<u64>, 
     pub bump: u8,
 }
 
@@ -101,4 +102,6 @@ pub struct VexlyVault {
 pub enum PhayError {
     #[msg("La dirección de destino no está en la whitelist de Phay.")]
     AddressNotWhitelisted,
+    #[msg("Este producto no está autorizado para su consumo.")]
+    InvalidProduct, // Added missing error
 }
