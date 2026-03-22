@@ -84,6 +84,7 @@ pub struct SecurePay<'info> {
     )]
     pub vault: Account<'info, PhayVault>, // Fixed name
     pub user: Signer<'info>,
+    /// CHECK: The destination address is manually checked against the whitelist in the instruction logic
     #[account(mut)]
     pub destination: AccountInfo<'info>,
     pub system_program: Program<'info, System>,

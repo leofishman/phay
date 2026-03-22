@@ -24,9 +24,10 @@ describe("phay", () => {
 
   it("Initializes the Phay Card with a whitelist successfully!", async () => {
     const whitelist = [approvedMerchant.publicKey];
+    const allowedProducts = [new anchor.BN(1), new anchor.BN(2)];
 
     await program.methods
-      .initializeVault(user.publicKey, whitelist)
+      .initializeVault(user.publicKey, whitelist, allowedProducts)
       .accounts({
         vault: vaultPDA,
         owner: owner.publicKey,
@@ -65,7 +66,7 @@ describe("phay", () => {
   it("Should FAIL if the User tries to pay an UNAUTHORIZED address", async () => {
     try {
       await program.methods
-        .securePay(new anchor.BN(0.05 * anchor.web3.LAMPORTS_PER_SOL))
+        .securePay(new anchor.BN(0.05 * anchor.web3.LAMPORTS_PER_SOL), new anchor.BN(1))
         .accounts({
           vault: vaultPDA,
           user: user.publicKey,
